@@ -1,53 +1,67 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+)
+
+var (
+	flagOutput = pflag.StringP("output", "o", ".github/CODEOWNERS", "output file. If \"-\", write to stdout")
 )
 
 func main() {
-	flag.Usage = usage
-	flag.Parse()
-
-	root, err := parseDir()
-	if err != nil {
-		log.Fatal(fmt.Errorf("error while parsing root dir: %w", err))
-	}
-
-	rewrittenCodeownerRules, err := RewriteCodeownersRules(root)
-	if err != nil {
-		log.Fatal(fmt.Errorf("error while rewriting codeowner rules in %s: %w", root, err))
-	}
-
-	if len(rewrittenCodeownerRules) == 0 {
-		log.Fatal(fmt.Errorf("no CODEOWNER rules found in %s", root))
-	}
-
-	generatedCodeownersFile := GenerateCodeownersFile(rewrittenCodeownerRules)
-
-	_, err = fmt.Printf(generatedCodeownersFile)
-	if err != nil {
-		log.Fatal(fmt.Errorf("error while printing generated filed: %w", err))
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
-func usage() {
-	_, err := fmt.Fprintf(flag.CommandLine.Output(), "usage: %s [dir]\n", os.Args[0])
-	if err != nil {
-		log.Fatal(fmt.Errorf("error while printing usage info: %w", err))
+func parseArgs(args []string) (string, error) {
+	if len(args) < 1 {
+		return os.Getwd()
 	}
+	return args[0], nil
 }
 
-func parseDir() (string, error) {
-	narg := flag.NArg()
-	switch {
-	case narg < 1:
-		return "", fmt.Errorf("no dir given")
-	case narg > 1:
-		return "", fmt.Errorf("can only process one dir at a time, got %d: %s", narg, flag.Args())
-	default:
-		return flag.Arg(0), nil
+var rootCmd = &cobra.Command{
+	Use:   "codeowners [flags] [path]",
+	Short: "codeowners generates a GitHub CODEOWNERS file from multiple CODEOWNERS files throughout the repo.",
+	Args:  cobra.MaximumNArgs(1),
+
+	Run: func(cmd *cobra.Command, args []string) {
+		root, err := parseArgs(args)
+		if err != nil {
+			log.Fatal(fmt.Errorf("error while parsing root dir: %w", err))
+		}
+
+		rewrittenCodeownerRules, err := RewriteCodeownersRules(root)
+		if err != nil {
+			log.Fatal(fmt.Errorf("error while rewriting codeowner rules in %s: %w", root, err))
+		}
+
+		if len(rewrittenCodeownerRules) == 0 {
+			log.Fatal(fmt.Errorf("no CODEOWNER rules found in %s", root))
+		}
+
+		generatedCodeownersFile := GenerateCodeownersFile(rewrittenCodeownerRules)
+
+		w, err := outWriter()
+		if err != nil {
+			log.Fatal(fmt.Errorf("error opening output file: %w", err))
+		}
+		fmt.Fprintln(w, generatedCodeownersFile)
+	},
+}
+
+func outWriter() (io.Writer, error) {
+	out := *flagOutput
+	if out == "-" {
+		return os.Stdout, nil
 	}
+	return os.Create(out)
 }
