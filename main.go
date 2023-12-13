@@ -12,6 +12,7 @@ import (
 
 var (
 	flagOutput = pflag.StringP("output", "o", ".github/CODEOWNERS", "output file. If \"-\", write to stdout")
+	flagIgnore = pflag.StringArrayP("ignore", "i", []string{"/vendor/"}, "list of filepath regexes to ignore relative to the input directory")
 )
 
 func main() {
@@ -39,7 +40,7 @@ var rootCmd = &cobra.Command{
 			log.Fatal(fmt.Errorf("error while parsing root dir: %w", err))
 		}
 
-		rewrittenCodeownerRules, err := RewriteCodeownersRules(root)
+		rewrittenCodeownerRules, err := RewriteCodeownersRules(root, *flagIgnore)
 		if err != nil {
 			log.Fatal(fmt.Errorf("error while rewriting codeowner rules in %s: %w", root, err))
 		}

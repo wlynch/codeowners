@@ -10,13 +10,11 @@ import (
 
 func TestE2E(t *testing.T) {
 	// Create a test env
-	tmpdir, err := os.MkdirTemp("", "test")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create a repo in the test env so that we have a predictable name
 	repoPath := filepath.Join(tmpdir, "repo")
-	err = os.Mkdir(repoPath, 0700)
+	err := os.Mkdir(repoPath, 0700)
 	require.NoError(t, err)
 
 	// Create an existing CODEOWNERS file that should not be processed
@@ -70,6 +68,7 @@ ci.yaml @org/ci-admin
 `
 	writeFile(t, repoPath, ".gitignore", ignoreFile)
 	writeFile(t, repoPath, "src/shouldBeIgnored/CODEOWNERS", ignoredCOFile)
+	writeFile(t, repoPath, "src/ignoredRegex/CODEOWNERS", ignoredCOFile)
 
 	// Test rule rewriting
 	expectedRules := []string{
@@ -90,7 +89,7 @@ ci.yaml @org/ci-admin
 		"/src/dir2/*.js @org/frontend @fullstackUser",
 	}
 
-	rewrittenRules, err := RewriteCodeownersRules(repoPath)
+	rewrittenRules, err := RewriteCodeownersRules(repoPath, []string{"/ignoredRegex$"})
 	require.NoError(t, err)
 	require.Equal(t, expectedRules, rewrittenRules)
 

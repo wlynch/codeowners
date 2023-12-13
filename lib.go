@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -43,7 +44,7 @@ func validateRoot(path string) (string, error) {
 
 // RewriteCodeownersRules visits every CODEOWNERS file under path (respecting .gitignore files
 // and rewrites its rules for inclusion in the root CO file.
-func RewriteCodeownersRules(path string) ([]string, error) {
+func RewriteCodeownersRules(path string, ignoreRegex []string) ([]string, error) {
 	root, err := validateRoot(path)
 	if err != nil {
 		return nil, fmt.Errorf("error while validating path %s: %w", path, err)
@@ -51,7 +52,7 @@ func RewriteCodeownersRules(path string) ([]string, error) {
 
 	var rewrittenRules []string
 
-	err = walkCodeownersFiles(root, func(coPath string) error {
+	err = walkCodeownersFiles(root, ignoreRegex, func(coPath string) error {
 		rules, procErr := processCodeownersFile(root, coPath)
 		if procErr != nil {
 			return procErr
@@ -73,8 +74,8 @@ type procFn = func(coPath string) error
 
 // walkCodeownersFiles walks visits every CODEOWNERS file under root and calls
 // procFn with the files absolute path as argument.
-func walkCodeownersFiles(root string, procFn procFn) error {
-	ignore := initGitignore(root)
+func walkCodeownersFiles(root string, ignoreRegex []string, procFn procFn) error {
+	ignore := newIgnorer(root, ignoreRegex)
 
 	dirQueue := newStringQueue()
 	dirQueue.Enqueue(root)
@@ -82,7 +83,7 @@ func walkCodeownersFiles(root string, procFn procFn) error {
 	for dirQueue.Len() > 0 {
 		currentDir := dirQueue.Dequeue()
 
-		if shouldIgnoreDir(ignore, currentDir) {
+		if ignore.shouldIgnore(currentDir) {
 			continue
 		}
 
@@ -123,27 +124,49 @@ func walkCodeownersFiles(root string, procFn procFn) error {
 	return nil
 }
 
-// initGitignore parses the .gitignore files under root, including nested ones.
-// If none are found or parsing errors, nil is returned.
-func initGitignore(root string) gitignore.GitIgnore {
-	ignore, _ := gitignore.NewRepository(root) // Ignore errors as ignore is an optional feature
+type ignorer struct {
+	root string
 
-	return ignore
+	git   gitignore.GitIgnore
+	regex []string
 }
 
-// shouldIgnoreDir tests whether a dir should be ignored.
-func shouldIgnoreDir(ignore gitignore.GitIgnore, path string) bool {
+func newIgnorer(root string, regex []string) *ignorer {
+	git, _ := gitignore.NewRepository(root) // Ignore errors as ignore is an optional feature
+
+	return &ignorer{
+		root:  root,
+		git:   git,
+		regex: regex,
+	}
+}
+
+func (i *ignorer) shouldIgnore(path string) bool {
 	if filepath.Base(path) == ".git" {
 		return true
 	}
 
-	if ignore == nil || ignore.Base() == path { // Don't ignore the root itself
+	if i.git == nil || i.git.Base() == path { // Don't ignore the root itself
 		return false
 	}
 
-	match := ignore.Match(path)
-	if match != nil {
-		return match.Ignore()
+	match := i.git.Match(path)
+	if match != nil && match.Ignore() {
+		return true
+	}
+
+	for _, regex := range i.regex {
+		re, err := regexp.Compile(regex)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(i.root, path)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(rel) {
+			return true
+		}
 	}
 
 	return false
